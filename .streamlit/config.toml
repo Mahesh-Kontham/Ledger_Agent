@@ -1,0 +1,75 @@
+# LedgerTruth design system: deep navy/ink base, ONE accent (blue) for primary actions.
+# Semantic colours (green / orange / gray / red) are reserved for status only.
+
+[server]
+runOnSave = true
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "10px"
+buttonRadius = "8px"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 15
+headingFontSizes = ["30px", "22px", "18px", "16px", "15px", "14px"]
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+metricValueFontSize = "1.7rem"
+metricValueFontWeight = 650
+linkUnderline = false
+
+[theme.light]
+primaryColor = "#2F5BEA"
+backgroundColor = "#F7F8FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0F1B33"
+linkColor = "#2F5BEA"
+borderColor = "#E2E6EF"
+codeBackgroundColor = "#EEF1F7"
+grayColor = "#64708A"
+greenColor = "#16803C"
+orangeColor = "#B45309"
+redColor = "#C2253A"
+blueColor = "#2F5BEA"
+chartCategoricalColors = ["#2F5BEA", "#93A8F4", "#0F1B33", "#64708A", "#C7D2FE", "#334155"]
+dataframeHeaderBackgroundColor = "#EEF1F7"
+dataframeBorderColor = "#E2E6EF"
+
+[theme.dark]
+primaryColor = "#6B8CFF"
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#121A2B"
+textColor = "#E6EAF2"
+linkColor = "#8FA8FF"
+borderColor = "#24304A"
+codeBackgroundColor = "#1A2338"
+grayColor = "#94A0B8"
+greenColor = "#4ADE80"
+orangeColor = "#FBBF24"
+redColor = "#F87171"
+blueColor = "#6B8CFF"
+chartCategoricalColors = ["#6B8CFF", "#A5B8FF", "#E6EAF2", "#94A0B8", "#3B4A6B", "#C7D2FE"]
+dataframeHeaderBackgroundColor = "#1A2338"
+dataframeHeaderTextColor = "#E6EAF2"
+dataframeBorderColor = "#24304A"
+
+[theme.light.sidebar]
+backgroundColor = "#0F1B33"
+secondaryBackgroundColor = "#18264A"
+textColor = "#E6EAF2"
+borderColor = "#24304A"
+primaryColor = "#8FA8FF"
+linkColor = "#8FA8FF"
+codeBackgroundColor = "#18264A"
+
+[theme.dark.sidebar]
+backgroundColor = "#070C17"
+secondaryBackgroundColor = "#121A2B"
+textColor = "#E6EAF2"
+borderColor = "#1C263B"
+primaryColor = "#8FA8FF"
+linkColor = "#8FA8FF"
+codeBackgroundColor = "#121A2B"

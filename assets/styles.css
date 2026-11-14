@@ -1,0 +1,36 @@
+/* LedgerTruth - small, targeted additions on top of .streamlit/config.toml.
+   Only stable .st-key-* hooks are used (no private Streamlit class names). */
+
+/* Primary call-to-action buttons: visually dominant */
+.st-key-primary_cta button,
+.st-key-login_submit button {
+  min-height: 3.1rem;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Approve / Reject on the review screen */
+.st-key-approve_btn button,
+.st-key-reject_btn button {
+  min-height: 3rem;
+  font-weight: 600;
+}
+
+/* Login card */
+.st-key-login_card {
+  max-width: 440px;
+  margin: 6vh auto 0 auto;
+}
+
+/* Promise line under the product name */
+.st-key-login_card h1 { letter-spacing: -0.02em; }
+
+/* KPI cards: equal height, a little breathing room */
+[class*="st-key-kpi_"] { min-height: 128px; }
+
+/* Selected item in the review list */
+[class*="st-key-qsel_"] button { justify-content: flex-start; text-align: left; }
+
+/* Pipeline steps */
+[class*="st-key-pipeline_steps"] p { margin-bottom: 0.15rem; }
