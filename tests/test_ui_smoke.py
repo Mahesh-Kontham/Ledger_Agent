@@ -85,20 +85,28 @@ def test_individual_approves_flagged_bill(seeded):
     assert any(r["action"] == "approve" for r in db.admin_audit_log())
 
 
-def test_business_fills_missing_gstin(seeded):
-    """BUSINESS requires GSTIN when tax > 0: Swiggy waits in the queue until a human supplies it."""
+def test_business_approves_flagged_and_fills_missing(seeded):
+    """BUSINESS: the edited Amazon bill is HIGH priority (approve posts it); Zomato needs date + total."""
+    from datetime import date
     login_as("business@demo", "BUSINESS")
-    swiggy = [b for b in db.list_bills() if b.merchant_normalized == "Swiggy"][0]
-    assert swiggy.status == "MISSING_DATA" and swiggy.missing_fields == ["gstin"]
+    by = {b.merchant_normalized: b for b in db.list_bills()}
+    assert by["Amazon"].status == "NEEDS_REVIEW" and by["Amazon"].review_priority == "HIGH"
+    assert by["Zomato"].status == "MISSING_DATA" and by["Zomato"].missing_fields == ["bill_date", "total_amount"]
+    assert by["Swiggy"].status == "VERIFIED"          # GSTIN no longer mandatory
     at = login("business@demo")
     at.switch_page("app_pages/review.py").run()
-    at.text_input(key=f"gstin_{swiggy.id}").input("29ABCDE1234F1Z5")
+    at.button(key="approve_btn").click().run()       # HIGH first -> Amazon
+    assert not at.exception, at.exception
+    z = by["Zomato"].id
+    at.date_input(key=f"bill_date_{z}").set_value(date(2026, 11, 5))
+    at.number_input(key=f"total_amount_{z}").set_value(300.0)
     at.button(key="approve_btn").click().run()
     assert not at.exception, at.exception
     login_as("business@demo", "BUSINESS")
-    after = db.get_bill(swiggy.id)
-    assert after.status == "VERIFIED"
-    assert any(r["account"] == "Asset:Input GST" for r in db.journal_rows() if r["bill_id"] == swiggy.id)
+    assert db.get_bill(by["Amazon"].id).status == "VERIFIED" and db.has_journal(by["Amazon"].id)
+    after = db.get_bill(z)
+    assert after.bill_date == "2026-11-05" and after.total_amount == 300.0
+    assert after.status in ("VERIFIED", "NEEDS_REVIEW")   # re-verified, never auto-approved
 
 
 def test_individual_budget_editor_saves(seeded):

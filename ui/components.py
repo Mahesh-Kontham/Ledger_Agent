@@ -15,6 +15,7 @@ from core import config, db
 from core.extract import extract_fields
 from core.models import Bill
 from core.pipeline import process_bill
+from core.tax import tax_breakdown
 from core.verify import indian_number
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -250,6 +251,12 @@ def bill_details(b: Bill) -> None:
             st.caption(f"{label}: score {b.fraud_score} · {'; '.join(b.fraud_signals) or 'no signals'}")
         if b.match_status:
             st.caption(f"Bank match: {match_label(b)}")
+        br = tax_breakdown(b.line_items or [])
+        if b.tax_amount is not None or br:
+            parts = " + ".join(f"{x['component']} {indian_number(x['amount'])}" for x in br if not x["is_total"])
+            st.caption(f"Tax: {money(b.tax_amount) if b.tax_amount is not None else '—'}"
+                       + (f" ({parts})" if parts else "")
+                       + (f" · GSTIN {b.gstin}" if b.gstin else (" · no GSTIN, so input tax can't be claimed" if not is_individual() else "")))
         if not ind:
             st.caption("Pipeline reasons: " + " | ".join(b.status_reasons))
         if b.field_confidence:
@@ -278,18 +285,38 @@ def bill_card(b: Bill, title: Optional[str] = None) -> None:
 
 
 # ---------------- alerts ----------------
-def toast_once(alerts, *, per_visit_key: Optional[str] = None) -> None:
-    """At most one toast per page load; INDIVIDUAL: at most one budget toast per visit (session)."""
-    alerts = list(alerts or [])
+SEVERITY = {"BUDGET_BREACH": 0, "BUDGET_WARNING": 1, "BUDGET_PACE": 2, "ANOMALY": 3}
+
+
+def toast_once(alerts, **_ignored) -> None:
+    """At most one toast per page load: the most severe new alert (a limit breach always wins).
+    Every alert is also kept in the notification centre (sidebar), so nothing is lost when a toast fades."""
+    alerts = sorted(list(alerts or []), key=lambda a: SEVERITY.get(a.alert_type, 9))
     if not alerts:
         return
-    if per_visit_key or is_individual():
-        k = per_visit_key or "budget_toast_shown"
-        if st.session_state.get(k):
-            return
-        st.session_state[k] = True
     a = alerts[0]
-    st.toast(a.message, icon=":material/notifications:")
+    more = f" (+{len(alerts) - 1} more in notifications)" if len(alerts) > 1 else ""
+    icon = ":material/error:" if a.alert_type == "BUDGET_BREACH" else ":material/notifications:"
+    st.toast(a.message + more, icon=icon, duration="long" if a.alert_type == "BUDGET_BREACH" else "short")
+
+
+def notification_center() -> None:
+    """Sidebar bell: unread alerts (budget pace/warning/breach and anomalies) until marked read."""
+    unread = db.unread_alerts()
+    label = f"Notifications ({len(unread)})" if unread else "Notifications"
+    with st.popover(label, icon=":material/notifications_active:" if unread else ":material/notifications:",
+                    width="stretch"):
+        if not unread:
+            st.caption("You're up to date. Budget and unusual-spending alerts appear here.")
+            recent = db.list_alerts()[:3]
+            if recent:
+                st.caption("Earlier")
+                alert_list(recent)
+            return
+        alert_list(unread[:8])
+        if st.button("Mark all as read", key="alerts_read", icon=":material/done_all:", width="stretch"):
+            db.mark_alerts_read()
+            st.rerun()
 
 
 def alert_list(alerts) -> None:
@@ -312,7 +339,10 @@ def process_with_progress(raw, label: str) -> Bill:
         with st.container(key=f"pipeline_steps_{abs(hash((label, raw.file_hash, id(raw))))}"):
             st.write(":material/document_scanner: Reading bill…")
             ext = extract_fields(raw)
-            if ext.error:
+            if ext.error and ("RESOURCE_EXHAUSTED" in ext.error or "429" in ext.error):
+                st.write(":material/hourglass_top: The AI reading limit for today is used up. The bill is saved "
+                         "with empty fields - fill them in on the review screen, nothing was guessed.")
+            elif ext.error:
                 st.write(":material/error: Couldn't read this image clearly - nothing was guessed.")
             else:
                 st.write(":material/check: Read the bill")

@@ -5,7 +5,7 @@ Run:  python -m streamlit run app.py
 import streamlit as st
 
 from core import auth, db
-from ui.components import inject_css
+from ui.components import inject_css, notification_center
 
 st.set_page_config(page_title="LedgerTruth", page_icon=":material/verified_user:", layout="wide")
 db.init_db()
@@ -77,10 +77,18 @@ with st.sidebar:
         st.markdown(f"**{user['name']}**")
         st.caption(user.get("org_name") or user["email"])
         st.badge(ROLE_NAME[user["role"]], icon=":material/badge:", color="blue")
-        if user["role"] != "ADMIN":
+    notif_slot = st.container() if user["role"] != "ADMIN" else None
+    st.button("Sign out", icon=":material/logout:", on_click=_logout, width="stretch")
+
+page = st.navigation(ROLE_PAGES[user["role"]], position="sidebar")
+try:
+    page.run()
+finally:
+    # Filled after the page ran, so alerts created on this page load (posting, approving,
+    # saving budgets) are already counted - the bell is always in sync.
+    if notif_slot is not None:
+        with notif_slot:
             n = db.review_queue_count()
             st.caption(("Nothing needs you" if n == 0 else f"{n} bill{'s' if n != 1 else ''} need{'s' if n == 1 else ''} you")
                        if user["role"] == "INDIVIDUAL" else f"Review queue: {n}")
-    st.button("Sign out", icon=":material/logout:", on_click=_logout, width="stretch")
-
-st.navigation(ROLE_PAGES[user["role"]], position="sidebar").run()
+            notification_center()

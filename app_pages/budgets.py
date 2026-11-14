@@ -43,7 +43,8 @@ df = pd.DataFrame([{"Category": c, "Monthly limit ₹": rows[c]["limit"] if c in
 
 section_header("Your limits" if ind else "Limits", "Edit the limit column. Leave it empty for no budget.")
 edited = st.data_editor(
-    df, hide_index=True, key="budget_editor", disabled=["Category", "Spent", "Status"],
+    df, hide_index=True, key=f"budget_editor_{st.session_state.get('bud_v', 0)}",
+    disabled=["Category", "Spent", "Status"],
     alt="Monthly budget limits by category",
     column_config={
         "Monthly limit ₹": st.column_config.NumberColumn("Monthly limit ₹", min_value=0, step=100, format="%.0f"),
@@ -64,6 +65,8 @@ if st.button("Save budgets", type="primary", key="primary_cta", icon=":material/
     if changes:
         db.log_action("budget_change", "; ".join(changes))
     st.session_state["bud_alerts"] = budgets.run_budget_checks(mode, today)
+    # fresh editor after saving: edits are row-position based, so never replay them onto re-ordered rows
+    st.session_state["bud_v"] = st.session_state.get("bud_v", 0) + 1
     st.session_state["bud_flash"] = "Budgets saved." if changes else "No changes."
     st.rerun()
 
@@ -85,7 +88,7 @@ else:
 
 c1, c2 = st.columns(2, gap="large")
 with c1:
-    section_header("Budget alerts")
+    section_header("Alert history", "Alerts fire once per period; the Status column above is always live.")
     ba = db.list_alerts(["BUDGET_PACE", "BUDGET_WARNING", "BUDGET_BREACH"])
     if ba:
         alert_list(ba[:10])

@@ -10,7 +10,7 @@ copy .env.example .env               # then set GEMINI_API_KEY and the 3 DEMO_*_
 python scripts\make_samples.py       # sample receipts + bank CSV
 python scripts\seed_users.py         # demo accounts (also runs automatically on first start)
 python -m streamlit run app.py
-python -m pytest -q                  # 50 tests, no API key needed
+python -m pytest -q                  # 67 tests, no API key needed
 ```
 
 Demo logins: `user@demo` (Individual), `business@demo` (Business), `admin@demo` (Admin). Passwords are the values in `.env`.
@@ -30,6 +30,18 @@ Sign in as **user@demo**. In **Settings**, click **Load sample bank statement**.
 | 8 | Budgets → Transport limit 100 → Save | One toast; chart shows Spent / Projected / Limit |
 | 9 | Sign out → sign in as **business@demo** | Bills without a bank match or GSTIN go to Review queue; Ledger → GST tab |
 | 10 | Ledger / Accountant view | Green "Balanced" badge at all times |
+
+## Gmail sign-in (optional)
+1. In Google Cloud console, create a project and enable the **Gmail API**.
+2. Set up the **OAuth consent screen** (External) and add your Gmail address as a test user.
+3. Go to **Credentials → Create OAuth client ID → Desktop app**, then download the JSON.
+4. Save it as `google_oauth_client.json` in this folder (or set `GOOGLE_OAUTH_CLIENT_FILE`).
+5. In the app, go to **Add bill → Email → Sign in with Google**, or use **Settings → Connected email**. A Google tab opens. After you approve, **Fetch new email bills** imports only emails it hasn't imported before.
+
+Without it, the Email source uses the IMAP app password from `.env`, or the demo inbox.
+
+## Gemini free tier
+The free tier allows 5 extractions per minute. When you hit that limit, the app waits (up to about 1 minute) and retries automatically, so a burst of uploads is slower but doesn't fail.
 
 ## Known limitations (PRD §17)
 - The fraud score comes from a mock unless `FRAUD_MCP_URL` is set.

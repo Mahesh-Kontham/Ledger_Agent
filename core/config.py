@@ -24,12 +24,13 @@ FRAUD = {
     "BUSINESS":   {"review": 40, "high": 70},   # >=40 NEEDS_REVIEW (NORMAL), >=70 NEEDS_REVIEW (HIGH)
 }
 
+# Reduced by product decision (PRD Section 19). Same four fields for both modes.
 MANDATORY_FIELDS = {
-    "INDIVIDUAL": ["merchant", "bill_date", "total_amount", "currency", "payment_mode"],
-    "BUSINESS":   ["merchant", "bill_date", "total_amount", "currency", "payment_mode",
-                   "invoice_number", "tax_amount"],
+    "INDIVIDUAL": ["merchant", "bill_date", "invoice_number", "total_amount"],
+    "BUSINESS":   ["merchant", "bill_date", "invoice_number", "total_amount"],
 }
-# BUSINESS extra rule: if tax_amount > 0 then gstin is mandatory.
+# Not mandatory, but never guessed: if a total is printed without a currency we cannot convert it to INR,
+# so "currency" is requested (see verify.check_mandatory).
 
 # Budgets
 PACE_FACTOR = 1.3                     # alert if spent_pct > 1.3 * elapsed_pct
@@ -55,6 +56,8 @@ MODES = ["INDIVIDUAL", "BUSINESS"]
 STATUSES = ["VERIFIED", "NEEDS_REVIEW", "MISSING_DATA", "DUPLICATE", "REJECTED"]
 PAYMENT_MODES = ["CARD", "UPI", "CASH", "NETBANKING", "WALLET"]
 LLM_MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-3.5-flash"
+# Tried in order when the main model is out of quota or unavailable (each model has its own free-tier quota)
+GEMINI_FALLBACK_MODELS = [m.strip() for m in (os.environ.get("GEMINI_FALLBACK_MODELS", "") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",") if m.strip()]
 
 DATA_DIR = ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
@@ -71,3 +74,4 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 FRAUD_MCP_URL = os.environ.get("FRAUD_MCP_URL", "")
 GMAIL_IMAP_USER = os.environ.get("GMAIL_IMAP_USER", "")
 GMAIL_IMAP_APP_PASSWORD = os.environ.get("GMAIL_IMAP_APP_PASSWORD", "")
+GOOGLE_OAUTH_CLIENT_FILE = os.environ.get("GOOGLE_OAUTH_CLIENT_FILE", "").strip() or str(ROOT / "google_oauth_client.json")

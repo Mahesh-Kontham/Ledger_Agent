@@ -23,7 +23,8 @@ flagged = [b for b in bills if b.status == "NEEDS_REVIEW" and (b.fraud_score or 
 flagged_amt = sum(b.total_amount_inr or 0 for b in flagged)
 gst = ledger.gst_summary(mode)
 gst_month = float(gst.loc[gst["month"] == month, "input_gst_inr"].sum()) if not gst.empty else 0.0
-gst_risk = [b for b in bills if b.status == "MISSING_DATA" and "gstin" in (b.missing_fields or [])]
+gst_risk = [b for b in bills if b.status in ("VERIFIED", "NEEDS_REVIEW", "MISSING_DATA")
+            and (b.tax_amount or 0) > 0 and not b.gstin]
 gst_risk_amt = sum((b.tax_amount or 0) * (b.fx_rate or 1) for b in gst_risk)
 unmatched = [b for b in bills if b.status in ("VERIFIED", "NEEDS_REVIEW") and b.match_status == "NO_MATCH"]
 brows = budgets.budget_rows(mode, today)

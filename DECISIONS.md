@@ -40,3 +40,16 @@
 35. **Admin privacy.** `db.admin_bill_stats` returns only status, fraud score, match status, timestamps and role. No images, file paths, merchants or amounts.
 36. **Navigation folder** is `app_pages/`, not `pages/`, so Streamlit's legacy auto-discovery can't expose pages outside the role-based `st.navigation`.
 37. **Demo passwords** live only in `.env`, which is gitignored. The login helper lists the seeded emails, never passwords.
+
+## Section 19 changes
+
+38. **Mandatory fields reduced** to merchant, bill_date, invoice_number, total_amount for both modes, at the product owner's request. This overrides CLAUDE.md rule 2 / PRD §8 for this constant only; all other thresholds are unchanged.
+39. **Currency is requested when missing.** If a total is printed without a currency, `currency` is asked for, because converting to INR without it would be a guess. A total in a currency outside the sample FX table still routes to MISSING_DATA ("fx_rate").
+40. **GSTIN rule removed.** A bill with tax but no GSTIN posts gross to expense (no Input GST split). The Business dashboard shows it as "GST at risk".
+41. **Bank-match fallback tightened** (see PRD 19.3). This was the root cause of "budgets not syncing": unrelated nearby debits trapped bills in review. All 6 sample bills match by merchant alias, so AT-1 to AT-10 are unaffected.
+42. **Toast policy.** One per page load, most severe first. This replaces "max one budget toast per visit", which hid later limit breaches. Persistent alerts now live in the notification centre (unread tracking in `settings` key `alerts_seen:<user_id>`).
+43. **Notification and review counts render after `page.run()`** (in a `finally`, so they still render when a page calls `st.stop()`). This keeps them consistent with alerts and bills created during the same run.
+44. **Gmail sign-in uses the installed-app OAuth flow** (`run_local_server`). Google opens the sign-in page in a browser on the machine running Streamlit, which suits this local demo; a hosted deployment would need a web OAuth redirect. The token is stored in `mail_accounts.token_json` inside `data/` (gitignored) and never leaves `core/db.py` / `core/mail.py`.
+45. **Incremental email sync** tracks Gmail message ids in `mail_seen`. A message is marked seen only after its attachments have been processed.
+46. **Tax summing** adds only printed amounts. A printed total wins over its components; a model value equal to a single component is replaced by the sum. Tax lines are kept in `line_items_json` for display, so no new column is needed.
+47. **Rate-limit retry** happens in `_call_llm` (one retry after Google's `retryDelay`, max 65 s). It is separate from the PRD's retry-once-on-bad-JSON rule.

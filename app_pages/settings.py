@@ -1,8 +1,8 @@
 import pandas as pd
 import streamlit as st
 
-from core import config, db, ingest
-from ui.components import empty_state, is_individual, money_table, page_header, section_header
+from core import config, db, ingest, mail
+from ui.components import empty_state, fmt_date, is_individual, money_table, page_header, section_header
 
 ind = is_individual()
 user = db.current_user()
@@ -41,6 +41,35 @@ else:
     empty_state("No bank statement yet",
                 "Load the sample statement or upload your own CSV. Bills are then checked against real debits.",
                 ":material/account_balance:")
+
+st.divider()
+section_header("Connected email", "Sign in with Google so we can pick up bill attachments from Gmail (read-only).")
+acc = mail.connected_account()
+with st.container(border=True):
+    if acc:
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.badge("Connected", icon=":material/mark_email_read:", color="green")
+            st.markdown(f"**{acc['email']}** · last checked "
+                        + (fmt_date(acc["last_sync_at"]) if acc.get("last_sync_at") else "never"))
+        if st.button("Disconnect Gmail", icon=":material/link_off:", key="mail_disconnect"):
+            mail.disconnect()
+            db.log_action("email_disconnect", acc["email"])
+            st.session_state["set_flash"] = ("success", "Gmail disconnected and access revoked.")
+            st.rerun()
+    elif mail.oauth_configured():
+        st.caption("Not connected.")
+        if st.button("Sign in with Google", icon=":material/login:", key="mail_connect"):
+            with st.spinner("A Google sign-in tab has opened - finish signing in there…"):
+                try:
+                    email = mail.connect_gmail()
+                    db.log_action("email_connect", email)
+                    st.session_state["set_flash"] = ("success", f"Gmail connected: {email}")
+                except Exception as e:
+                    st.session_state["set_flash"] = ("error", f"Sign-in didn't complete: {e}")
+            st.rerun()
+    else:
+        st.caption(f"Google sign-in isn't set up yet. Add the OAuth client file `{mail.client_file().name}` "
+                   "to the project folder (README → Gmail sign-in), then refresh.")
 
 st.divider()
 section_header("Account")

@@ -2,3 +2,5 @@ data/
 .env
 __pycache__/
 .pytest_cache/
+google_oauth_client*.json
+client_secret*.json

@@ -74,11 +74,19 @@ def test_fee_items_explain_variance(fresh_db):
     assert m.match_status == "VARIANCE_EXPLAINED" and m.variance_reason == "Fee on bill: Convenience fee"
 
 
-def test_mandatory_business_gstin_rule():
+def test_mandatory_fields_reduced():
     b = Bill(source="manual", mode="BUSINESS", merchant_raw="X", bill_date="2026-11-01", total_amount=100.0,
-             currency="INR", payment_mode="CASH", invoice_number="1", tax_amount=18.0)
-    assert verify.check_mandatory(b, "BUSINESS") == ["gstin"]
+             currency="INR", invoice_number="1", tax_amount=18.0)       # no payment mode, no GSTIN
+    assert verify.check_mandatory(b, "BUSINESS") == []
     assert verify.check_mandatory(b, "INDIVIDUAL") == []
+    b.invoice_number = None
+    assert verify.check_mandatory(b, "INDIVIDUAL") == ["invoice_number"]
+
+
+def test_total_without_currency_asks_for_currency_never_assumes_inr():
+    b = Bill(source="upload", mode="INDIVIDUAL", merchant_raw="X", bill_date="2026-11-01", total_amount=100.0,
+             invoice_number="1", currency=None)
+    assert verify.check_mandatory(b, "INDIVIDUAL") == ["currency"]
 
 
 def test_low_confidence_is_nulled():

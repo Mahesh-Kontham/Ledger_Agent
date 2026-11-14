@@ -12,7 +12,7 @@ from datetime import date
 from pathlib import Path
 from typing import Callable, Optional
 
-from core import config
+from core import config, tax
 from core.models import ExtractedFields, RawBill
 
 SYSTEM_PROMPT = """You extract data from a single receipt or invoice image. Return ONLY a JSON object, no prose.
@@ -22,6 +22,10 @@ Rules:
 - Dates in YYYY-MM-DD. Amounts as numbers without currency symbols or commas.
 - currency as ISO 4217 code (INR, USD, EUR...). If no symbol or code is printed, value = null.
 - line_items: only lines actually printed. fee_items: printed lines that are fees, tips, surcharges or convenience charges.
+- Tax can be printed under many names: GST, CGST, SGST, UTGST, IGST, cess, VAT, service tax, "Tax", "GST @18%". All of them are tax.
+- tax_lines: every printed tax component line (e.g. CGST 9% = 23.00, SGST 9% = 23.00), with the amount exactly as printed. Do not include rates without amounts, GSTIN numbers or "taxable value".
+- tax_amount: the total tax figure if one is printed (e.g. "Total GST"); if only components are printed, return null (do not add them up).
+- gstin: the seller's 15-character GST registration number. It may be labelled GSTIN, GST No, GST Reg. No or GSTIN/UIN.
 Schema:
 {
  "merchant":       {"value": string|null, "confidence": number},
@@ -33,7 +37,8 @@ Schema:
  "payment_mode":   {"value": "CARD"|"UPI"|"CASH"|"NETBANKING"|"WALLET"|null, "confidence": number},
  "gstin":          {"value": string|null, "confidence": number},
  "line_items":     [{"description": string, "amount": number}],
- "fee_items":      [{"description": string, "amount": number}]
+ "fee_items":      [{"description": string, "amount": number}],
+ "tax_lines":      [{"description": string, "amount": number}]
 }"""
 
 FIELDS = ["merchant", "bill_date", "invoice_number", "total_amount", "tax_amount",
@@ -87,20 +92,55 @@ def image_for_llm(path: str) -> tuple[bytes, str]:
 
 
 # ---------------- LLM call ----------------
+RATE_LIMIT_MAX_WAIT_S = 65      # free tier: 5 requests/minute -> wait out the window once, then give up
+
+
+def _retry_delay(err) -> Optional[float]:
+    """Seconds to wait from a 429 RESOURCE_EXHAUSTED error, else None (not a rate limit)."""
+    if getattr(err, "code", None) != 429 and "RESOURCE_EXHAUSTED" not in str(err):
+        return None
+    m = re.search(r"retry in ([0-9.]+)s|'retryDelay': '([0-9.]+)s'", str(err))
+    return float(next(g for g in m.groups() if g)) + 1 if m else 30.0
+
+
 def _call_llm(image_bytes: bytes, media_type: str) -> str:
+    """Gemini call. Per-minute rate limit -> wait and retry once. Daily quota exhausted or model retired
+    -> try the next model in GEMINI_FALLBACK_MODELS (each Gemini model has its own free-tier quota)."""
+    import time
     from google.genai import types
     client = _get_client()
-    resp = client.models.generate_content(
-        model=config.LLM_MODEL,
-        contents=[types.Part.from_bytes(data=image_bytes, mime_type=media_type),
-                  "Extract the fields from this receipt/invoice."],
-        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT, temperature=0,
-                                           response_mime_type="application/json"),
-    )
-    text = resp.text
-    if not text:
-        raise RuntimeError("Model returned no text (possibly blocked)")
-    return text
+
+    def call(model):
+        return client.models.generate_content(
+            model=model,
+            contents=[types.Part.from_bytes(data=image_bytes, mime_type=media_type),
+                      "Extract the fields from this receipt/invoice."],
+            config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT, temperature=0,
+                                               response_mime_type="application/json"),
+        )
+
+    models = [config.LLM_MODEL] + [m for m in config.GEMINI_FALLBACK_MODELS if m != config.LLM_MODEL]
+    last_err = None
+    for model in models:
+        try:
+            try:
+                resp = call(model)
+            except Exception as e:
+                delay = _retry_delay(e)
+                if delay is None or delay > RATE_LIMIT_MAX_WAIT_S:
+                    raise
+                time.sleep(delay)      # per-minute limit: wait for the window Google asks for, retry once
+                resp = call(model)
+        except Exception as e:
+            last_err = e
+            if _retry_delay(e) is not None or getattr(e, "code", None) == 404 or "NOT_FOUND" in str(e):
+                continue               # quota exhausted / model unavailable -> next model
+            raise
+        text = resp.text
+        if not text:
+            raise RuntimeError("Model returned no text (possibly blocked)")
+        return text
+    raise last_err
 
 
 def _parse_json(text: str) -> dict:
@@ -138,6 +178,9 @@ def _coerce(field: str, value):
     if field == "payment_mode":
         v = str(value).strip().upper()
         return (v, True) if v in config.PAYMENT_MODES else (None, False)
+    if field == "gstin":
+        g = tax.normalize_gstin(value)
+        return (g, True) if g else (None, False)
     v = str(value).strip()
     return (v, True) if v else (None, True)
 
@@ -168,9 +211,30 @@ def postprocess(obj: dict) -> ExtractedFields:
             low.append(f)
             val = None
         values[f] = val
+    line_items, fee_items = _items(obj.get("line_items")), _items(obj.get("fee_items"))
+    tax_lines = _items(obj.get("tax_lines"))
+    apply_tax_lines(values, conf, low, tax_lines + line_items + fee_items)
+    # keep printed tax components visible in the bill's line items (no new column needed)
+    known = {(i["description"], i["amount"]) for i in line_items}
+    line_items += [t for t in tax_lines if (t["description"], t["amount"]) not in known]
     return ExtractedFields(values=values, confidence=conf, low_confidence_fields=low,
-                           line_items=_items(obj.get("line_items")),
-                           fee_items=_items(obj.get("fee_items")), raw_response=obj)
+                           line_items=line_items, fee_items=fee_items, raw_response=obj)
+
+
+def apply_tax_lines(values: dict, conf: dict, low: list, lines: list) -> None:
+    """Flexible tax: CGST/SGST/IGST/UTGST/cess/VAT/... printed lines -> tax_amount.
+    Only printed amounts are summed; a tax rate is never used to compute tax."""
+    derived = tax.tax_from_lines(lines)
+    if derived is None:
+        return
+    current = values.get("tax_amount")
+    comps = [b["amount"] for b in tax.tax_breakdown(lines) if not b["is_total"]]
+    # Use the printed lines when no total tax was read, or when the model returned only one component
+    if current is None or (abs(current - derived) > 0.01 and any(abs(current - c) <= 0.01 for c in comps)):
+        values["tax_amount"] = derived
+        conf["tax_amount"] = max(conf.get("tax_amount") or 0.0, config.CONFIDENCE_THRESHOLD)
+        if "tax_amount" in low:
+            low.remove("tax_amount")
 
 
 def failed_extraction(error: str) -> ExtractedFields:
@@ -185,8 +249,11 @@ def extract_fields(raw: RawBill, llm: Optional[Callable[[bytes, str], str]] = No
         for f in FIELDS:
             v, ok = _coerce(f, (raw.fields or {}).get(f))
             values[f] = v if ok else None
-        return ExtractedFields(values=values, confidence={f: 1.0 for f in FIELDS},
-                               line_items=_items((raw.fields or {}).get("line_items")),
+        conf = {f: 1.0 for f in FIELDS}
+        tax_lines = _items((raw.fields or {}).get("tax_lines"))
+        apply_tax_lines(values, conf, [], tax_lines)
+        return ExtractedFields(values=values, confidence=conf,
+                               line_items=_items((raw.fields or {}).get("line_items")) + tax_lines,
                                fee_items=_items((raw.fields or {}).get("fee_items")))
 
     llm = llm or _call_llm

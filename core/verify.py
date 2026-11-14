@@ -66,7 +66,11 @@ def cross_verify(bill: Bill) -> MatchResult:
                       if _days_apart(t.txn_date, bill.bill_date) <= config.MATCH_DATE_WINDOW_DAYS]
         key = merchants.match_key(bill.merchant_raw, bill.merchant_normalized)
         preferred = [t for t in candidates if key and key in t.description.lower()]
-        pool = preferred or candidates
+        # PRD Section 19: a debit whose description does NOT name the merchant is only accepted when the
+        # amount itself matches (within tolerance). Otherwise an unrelated debit nearby would be paired,
+        # flagged as an "unexplained gap", and the bill would never reach the ledger or the budget.
+        pool = preferred or [t for t in candidates
+                             if abs(t.amount_inr - bill.total_amount_inr) <= tolerance(bill.total_amount_inr)]
         if pool:
             base = bill.total_amount_inr
             txn = min(pool, key=lambda t: (abs(t.amount_inr - base), t.id))
@@ -104,6 +108,6 @@ def classify_variance(bill: Bill, variance: float) -> MatchResult:
 # ---------------- 9.4 mandatory fields ----------------
 def check_mandatory(bill: Bill, mode: str) -> list[str]:
     missing = [f for f in config.MANDATORY_FIELDS[mode] if bill.field_value(f) is None]
-    if mode == "BUSINESS" and bill.tax_amount is not None and bill.tax_amount > 0 and not bill.gstin:
-        missing.append("gstin")
+    if bill.total_amount is not None and bill.currency is None:
+        missing.append("currency")      # needed to convert to INR - never assumed
     return missing

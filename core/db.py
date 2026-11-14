@@ -126,6 +126,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL
 );
 
+-- PRD Section 19: per-user mailbox connection (Google sign-in) and processed-message tracking
+CREATE TABLE IF NOT EXISTS mail_accounts (
+  user_id INTEGER PRIMARY KEY,
+  provider TEXT NOT NULL,
+  email TEXT NOT NULL,
+  token_json TEXT NOT NULL,
+  connected_at TEXT NOT NULL,
+  last_sync_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS mail_seen (
+  user_id INTEGER NOT NULL,
+  message_id TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, message_id)
+);
+
 -- Not in PRD Section 7; needed for "mode stored in a settings row" (PRD Section 15). See DECISIONS.md.
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -162,6 +179,7 @@ JSON_FIELDS = {
 
 
 USER_TABLES = ["bills", "transactions", "journal_lines", "budgets", "alerts"]
+MAIL_TABLES = ["mail_accounts", "mail_seen"]
 DEMO_BUSINESS_EMAIL = "business@demo"
 
 # The logged-in user for the current script run. Set once per Streamlit run (app.py) or per test.
@@ -260,12 +278,13 @@ def clear_my_data() -> None:
     with get_conn() as conn:
         for t in USER_TABLES:
             conn.execute(f"DELETE FROM {t} WHERE user_id=?", (uid,))
+        conn.execute("DELETE FROM mail_seen WHERE user_id=?", (uid,))
 
 
 def reset_db() -> None:
     """Drop everything (tests/tooling only - not exposed in the UI)."""
     with get_conn() as conn:
-        for t in USER_TABLES + ["merchant_aliases", "settings", "users", "audit_log"]:
+        for t in USER_TABLES + MAIL_TABLES + ["merchant_aliases", "settings", "users", "audit_log"]:
             conn.execute(f"DROP TABLE IF EXISTS {t}")
     init_db()
 
@@ -630,3 +649,61 @@ def admin_audit_log(limit: int = 1000) -> list[dict]:
             "SELECT a.id, a.created_at, u.email, u.role, a.action, a.target FROM audit_log a "
             "LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------- mail connection (per user) ----------------
+def get_mail_account() -> Optional[dict]:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM mail_accounts WHERE user_id=?", (_uid(),)).fetchone()
+    return dict(row) if row else None
+
+
+def save_mail_account(provider: str, email: str, token_json: str) -> None:
+    with get_conn() as conn:
+        conn.execute("INSERT INTO mail_accounts (user_id, provider, email, token_json, connected_at) "
+                     "VALUES (?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider, "
+                     "email=excluded.email, token_json=excluded.token_json, connected_at=excluded.connected_at",
+                     (_uid(), provider, email, token_json, now_iso()))
+
+
+def update_mail_token(token_json: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE mail_accounts SET token_json=? WHERE user_id=?", (token_json, _uid()))
+
+
+def touch_mail_sync() -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE mail_accounts SET last_sync_at=? WHERE user_id=?", (now_iso(), _uid()))
+
+
+def delete_mail_account() -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM mail_accounts WHERE user_id=?", (_uid(),))
+
+
+def mail_seen_ids() -> set:
+    with get_conn() as conn:
+        return {r[0] for r in conn.execute("SELECT message_id FROM mail_seen WHERE user_id=?", (_uid(),)).fetchall()}
+
+
+def mark_mail_seen(message_ids) -> None:
+    uid, now = _uid(), now_iso()
+    with get_conn() as conn:
+        conn.executemany("INSERT OR IGNORE INTO mail_seen (user_id, message_id, seen_at) VALUES (?,?,?)",
+                         [(uid, m, now) for m in message_ids])
+
+
+# ---------------- notifications (unread alerts, per user) ----------------
+def _alerts_seen_key() -> str:
+    return f"alerts_seen:{_uid()}"
+
+
+def unread_alerts() -> list[Alert]:
+    last = int(get_setting(_alerts_seen_key(), "0") or 0)
+    return [a for a in list_alerts() if a.id > last]
+
+
+def mark_alerts_read() -> None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT COALESCE(MAX(id), 0) FROM alerts WHERE user_id=?", (_uid(),)).fetchone()
+    set_setting(_alerts_seen_key(), str(row[0]))

@@ -530,3 +530,42 @@ This section overrides Section 16's "user login and roles = WON'T". The core pip
 - AT-10 holds per user's books.
 - `tests/test_auth_scoping.py` proves a user can never see another user's bills.
 - `tests/test_ui_smoke.py` renders every page for every role.
+
+---
+
+## 19. Amendment: Scan, budget sync, mandatory fields, Gmail sign-in, flexible tax (2026-11-14)
+
+### 19.1 Scan
+- The bill source is chosen with a segmented control, not tabs, so only the chosen source is rendered and the camera is never on in the background.
+- The camera flow is: **Open camera** → Take Photo → the camera widget is removed (camera released) → preview → **Check this bill** or **Retake**. Leaving the Scan source also turns the camera off.
+
+### 19.2 Mandatory fields (overrides Section 8)
+- `MANDATORY_FIELDS` = merchant, bill_date, invoice_number, total_amount for **both** modes.
+- The BUSINESS "GSTIN if tax > 0" rule is removed. Instead, a bill with tax but no GSTIN posts its full amount to expense (no Input GST split) and is counted under "GST at risk" on the Business dashboard.
+- If a total is printed without a currency, `currency` is requested (never assumed to be INR), because the total cannot be converted otherwise.
+
+### 19.3 Bank matching (amends Section 9.3 step 2)
+- A debit whose description does not contain the merchant is accepted only when its amount is within tolerance of the bill.
+- Before this change, any unrelated debit within ±2 days was paired, marked VARIANCE_UNEXPLAINED and held in review, so the bill never reached the ledger or the budget.
+
+### 19.4 Budget sync & notifications (amends Section 11.1)
+- Budget checks run after every posting (as before) and whenever budgets are saved.
+- **Toasts:** at most one per page load, showing the most severe new alert. BUDGET_BREACH is never suppressed.
+- **Notification centre:** a sidebar bell lists unread alerts until "Mark all as read", per user. It is rendered after the page runs, so it is always in sync with alerts created on that page load.
+- The budget editor is reset after each save, so edits are never replayed onto re-ordered rows.
+
+### 19.5 Gmail via Google sign-in
+- OAuth 2.0, `gmail.readonly` scope, one mailbox per user.
+- New tables: `mail_accounts(user_id, provider, email, token_json, connected_at, last_sync_at)` and `mail_seen(user_id, message_id, seen_at)`.
+- "Fetch new email bills" imports only messages not imported before (PDF/JPG/PNG attachments, last 30 days). Disconnecting revokes the token.
+- The IMAP app password and the sample inbox remain as fallbacks.
+
+### 19.6 Flexible tax
+- GST, CGST, SGST, UTGST, IGST, cess, VAT, service tax, "Tax", "GST @18%" (any label) are all recognised as tax (`core/tax.py`).
+- The extraction prompt now also returns `tax_lines` (each printed tax component).
+- `tax_amount` = the printed tax total if there is one, else the sum of the printed components. Tax is never computed from a rate.
+- GSTIN is accepted under any common label (GSTIN, GST No, GST Reg. No, GSTIN/UIN) and validated as 15 characters. An invalid GSTIN becomes null.
+- Manual entry accepts a total tax or CGST / SGST-UTGST / IGST / cess parts.
+
+### 19.7 Extraction rate limits
+- On HTTP 429 (Gemini free tier: 5 requests/minute) the extractor waits the delay Google returns (up to 65 s) and retries once, so bills are not wrongly routed to MISSING_DATA.
